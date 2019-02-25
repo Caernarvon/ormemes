@@ -42,8 +42,7 @@ public class Bot extends TelegramLongPollingBot implements Lock {
                     !update.getCallbackQuery().getMessage().getText().contains(update.getCallbackQuery().getFrom().getFirstName())) {
                 editPoll(update, (findPoll(update)));
             }
-        } else if (update.hasMessage() && update.getMessage().hasPhoto() && !passed) {
-            passed = true;
+        } else if (update.hasMessage() && update.getMessage().hasPhoto()) {
             try {
                 if (update.getMessage().hasPhoto()) {
                     synchronized (this) {
