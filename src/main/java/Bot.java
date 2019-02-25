@@ -5,8 +5,6 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
-import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.media.InputMedia;
 import org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto;
@@ -24,7 +22,6 @@ public class Bot extends TelegramLongPollingBot implements Lock {
 
     private LinkedList<Poll> polls = new LinkedList<>();
     private LinkedList<Update> updates = new LinkedList<>();
-    private boolean passed;
 
     public void onUpdateReceived(Update update) {
         updates.add(update);
@@ -36,8 +33,7 @@ public class Bot extends TelegramLongPollingBot implements Lock {
                     e.printStackTrace();
                 }
             }
-        }
-        else if (update.hasCallbackQuery()) {
+        } else if (update.hasCallbackQuery()) {
             if (update.getCallbackQuery().getData().equals("vote") &&
                     !update.getCallbackQuery().getMessage().getText().contains(update.getCallbackQuery().getFrom().getFirstName())) {
                 editPoll(update, (findPoll(update)));
@@ -46,7 +42,7 @@ public class Bot extends TelegramLongPollingBot implements Lock {
             try {
                 if (update.getMessage().hasPhoto()) {
                     synchronized (this) {
-                        new  Thread(() -> {
+                        new Thread(() -> {
                             try {
                                 execute(sendMediaGroup(findMultipleUpdates(), "-1001302700256"));
                                 postPoll(createPoll(update, update.getMessage().getMessageId()));
@@ -107,7 +103,7 @@ public class Bot extends TelegramLongPollingBot implements Lock {
         editMessage.setMessageId(poll.getMessageId());
         poll.setCounter(poll.getCounter() + 1);
         editMessage.setReplyMarkup(poll.getInlineKeyboardMarkup());
-        poll.getInlineKeyboardMarkup().getKeyboard().get(0).get(0).setText("Yes  -  " + poll.getCounter().toString()); // отображение кол-ва проголосовавших
+        poll.getInlineKeyboardMarkup().getKeyboard().get(0).get(0).setText("В прод  -  " + poll.getCounter().toString()); // отображение кол-ва проголосовавших
         try {
             GetChatMemberCount getChatMemberCount = new GetChatMemberCount();
             getChatMemberCount.setChatId("-1001302700256");
