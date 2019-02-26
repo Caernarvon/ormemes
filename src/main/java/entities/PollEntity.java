@@ -1,3 +1,5 @@
+package entities;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -8,7 +10,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-class PollEntity {
+public class PollEntity {
 
     private Integer messageId;
 
