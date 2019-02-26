@@ -1,5 +1,16 @@
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import org.jetbrains.annotations.NotNull;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMemberCount;
 import org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -11,21 +22,17 @@ import org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
-
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
 
 public class Bot extends TelegramLongPollingBot implements Lock {
+    private final String CHAT_ID = "-1001302700256";
+    private final String CHANNEL_ID = "-1001441629708";
 
-    private LinkedList<Poll> polls = new LinkedList<>();
-    private LinkedList<Update> updates = new LinkedList<>();
+    private LinkedList<PollEntity> polls = Lists.newLinkedList();
+    private Map<Integer, List<Update>> updateMap = Maps.newHashMap();
 
     public void onUpdateReceived(Update update) {
-        updates.add(update);
-        if (!update.hasCallbackQuery() && updates.size() >= 2 && !(findMultipleUpdates().size() == 0)) {
+        addUpdate(update);
+        if (!update.hasCallbackQuery() && findMultipleUpdates().isPresent()) {
             synchronized (this) {
                 try {
                     this.tryLock(1, TimeUnit.NANOSECONDS);
@@ -34,28 +41,30 @@ public class Bot extends TelegramLongPollingBot implements Lock {
                 }
             }
         } else if (update.hasCallbackQuery()) {
-            if (update.getCallbackQuery().getData().equals("vote") &&
-                    !update.getCallbackQuery().getMessage().getText().contains(update.getCallbackQuery().getFrom().getFirstName())) {
-                editPoll(update, (findPoll(update)));
+            if (update.getCallbackQuery().getData().equals(CallbackData.VOTE.name()) &&
+                !update.getCallbackQuery().getMessage().getText().contains(update.getCallbackQuery().getFrom().getFirstName())) {
+                findPoll(update).ifPresent(poll -> editPoll(update, poll));
             }
         } else if (update.hasMessage() && update.getMessage().hasPhoto()) {
             try {
                 if (update.getMessage().hasPhoto()) {
                     synchronized (this) {
-                        new Thread(() -> {
+                        new Thread(() ->
+                          findMultipleUpdates().ifPresent(multipleUpdates -> {
                             try {
-                                execute(sendMediaGroup(findMultipleUpdates(), "-1001302700256"));
+                                execute(sendMediaGroup(multipleUpdates, CHAT_ID));
                                 postPoll(createPoll(update, update.getMessage().getMessageId()));
                             } catch (TelegramApiException e) {
                                 e.printStackTrace();
                             }
-                        }).start();
+                          })
+                        ).start();
                     }
-                    //TODO научить реаггировать на группы картинок и на одну
+                    //TODO научить реагировать на группы картинок и на одну
 
                 } else {
                     ForwardMessage forwardMessage = new ForwardMessage();
-                    forwardMessage.setChatId("-1001302700256");
+                    forwardMessage.setChatId(CHAT_ID);
                     forwardMessage.setFromChatId(update.getMessage().getChatId());
                     forwardMessage.setMessageId(update.getMessage().getMessageId());
                     sendApiMethod(forwardMessage);
@@ -67,27 +76,32 @@ public class Bot extends TelegramLongPollingBot implements Lock {
         }
     }
 
-    private InlineKeyboardMarkup createPoll(Update update, Integer connectedPost) {
+    private InlineKeyboardMarkup createPoll(Update update, Integer connectedPostId) {
         InlineKeyboardMarkup inlineKeyboardMarkup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowList = Lists.newArrayList();
+        List<InlineKeyboardButton> keyboardButtonsRow1 = Lists.newArrayList();
+
         InlineKeyboardButton yesButton = new InlineKeyboardButton();
-        List<InlineKeyboardButton> keyboardButtonsRow1 = new LinkedList<>();
-        List<List<InlineKeyboardButton>> rowList = new ArrayList<>();
-        Poll poll = new Poll();
         yesButton.setText("Yes");
-        yesButton.setCallbackData("vote");
+        yesButton.setCallbackData(CallbackData.VOTE.name());
         keyboardButtonsRow1.add(yesButton);
+
         rowList.add(keyboardButtonsRow1);
         inlineKeyboardMarkup.setKeyboard(rowList);
-        poll.setChatId(update.getMessage().getChatId());
-        poll.setInlineKeyboardMarkup(inlineKeyboardMarkup);
-        poll.setConnectedPost(connectedPost);
+
+        PollEntity poll = PollEntity.builder()
+            .chatId(update.getMessage().getChatId())
+            .inlineKeyboardMarkup(inlineKeyboardMarkup)
+            .connectedPostId(connectedPostId)
+            .build();
         polls.add(poll);
+
         return inlineKeyboardMarkup;
     }
 
     private void postPoll(InlineKeyboardMarkup inlineKeyboardMarkup) {
         SendMessage sendMessage = new SendMessage();
-        sendMessage.setChatId("-1001302700256").setText("За: ").setReplyMarkup(inlineKeyboardMarkup);
+        sendMessage.setChatId(CHAT_ID).setText("За: ").setReplyMarkup(inlineKeyboardMarkup);
         try {
             polls.getLast().setMessageId(execute(sendMessage).getMessageId());
         } catch (TelegramApiException e) {
@@ -95,46 +109,58 @@ public class Bot extends TelegramLongPollingBot implements Lock {
         }
     }
 
-    private void editPoll(Update update, Poll poll) {
+    private void editPoll(Update update, PollEntity poll) {
         EditMessageText editMessage = new EditMessageText();
-        editMessage.setChatId("-1001302700256");
+        editMessage.setChatId(CHAT_ID);
         editMessage.setText(update.getCallbackQuery().getMessage().getText() + " "
-                + update.getCallbackQuery().getFrom().getFirstName() + ", ");
+            + update.getCallbackQuery().getFrom().getFirstName() + ", ");
         editMessage.setMessageId(poll.getMessageId());
         poll.setCounter(poll.getCounter() + 1);
         editMessage.setReplyMarkup(poll.getInlineKeyboardMarkup());
         poll.getInlineKeyboardMarkup().getKeyboard().get(0).get(0).setText("В прод  -  " + poll.getCounter().toString()); // отображение кол-ва проголосовавших
         try {
             GetChatMemberCount getChatMemberCount = new GetChatMemberCount();
-            getChatMemberCount.setChatId("-1001302700256");
+            getChatMemberCount.setChatId(CHAT_ID);
             int membersCount = execute(getChatMemberCount) / 2;
             if (poll.getCounter() >= membersCount) {
                 editMessage.setText("Пост отправлен");
                 execute(editMessage);
 
-                if (findUpdate(poll.getConnectedPost()).getMessage().hasPhoto()) {
+                findUpdate(poll.getConnectedPostId()).ifPresent(upd -> {
+                    try {
+                        if (upd.getMessage().hasPhoto()) {
 
-                    if (findUpdate(poll.getConnectedPost()).getMessage().getPhoto().size() / 4 == 1) {
-                        SendPhoto sendPhoto = new SendPhoto();
-                        sendPhoto.setPhoto(findUpdate(poll.getConnectedPost()).getMessage().getPhoto().get(0).getFileId());
-                        sendPhoto.setCaption("прислал " + findUpdate(poll.getConnectedPost()).getMessage().getFrom().getFirstName());
-                        sendPhoto.setChatId("-1001441629708");
-                        execute(sendPhoto);
+                            if (upd.getMessage().getPhoto().size() / 4 == 1) {
+                                SendPhoto sendPhoto = new SendPhoto();
+                                sendPhoto.setPhoto(upd.getMessage().getPhoto().get(0).getFileId());
+                                sendPhoto.setCaption("прислал " + upd.getMessage().getFrom().getFirstName());
+                                sendPhoto.setChatId(CHANNEL_ID);
+                                execute(sendPhoto);
 
-                        updates.remove(update);
-                        polls.remove(poll);
-                    } else {
-                        execute(sendMediaGroup(findMultipleUpdates(), "-1001441629708"));
+                                updateMap.remove(update.getMessage().getDate());
+                                polls.remove(poll);
+                            } else {
+                              findMultipleUpdates().ifPresent(multipleUpdates -> {
+                                try {
+                                  execute(sendMediaGroup(multipleUpdates, CHANNEL_ID));
 
-                        updates.remove(update);
-                        polls.remove(poll);
+                                  updateMap.remove(update.getMessage().getDate());
+                                  polls.remove(poll);
+                                } catch (TelegramApiException e) {
+                                  e.printStackTrace();
+                                }
+                              });
+                            }
+
+                        } else if (upd.getMessage().hasAnimation()) {
+
+                        } else if (upd.getMessage().hasVideo()) {
+
+                        }
+                    }catch (TelegramApiException e){
+                        e.printStackTrace();
                     }
-
-                } else if (findUpdate(poll.getMessageId()).getMessage().hasAnimation()) {
-
-                } else if (findUpdate(poll.getMessageId()).getMessage().hasVideo()) {
-
-                }
+                });
             } else {
                 execute(editMessage);
             }
@@ -146,54 +172,47 @@ public class Bot extends TelegramLongPollingBot implements Lock {
     private SendMediaGroup sendMediaGroup(List<Update> filteredUpdates, String chatId) {
         SendMediaGroup sendMediaGroup = new SendMediaGroup();
         sendMediaGroup.setChatId(chatId);
-        LinkedList<InputMedia> inputMedia = new LinkedList<>();
+        List<InputMedia> inputMedia = Lists.newArrayList();
 
-        for (Update update : filteredUpdates) {
+        filteredUpdates.forEach(update -> {
             InputMedia inputMediaPhoto = new InputMediaPhoto();
             inputMediaPhoto.setMedia(update.getMessage().getPhoto().get(update.getMessage().getPhoto().size() - 1).getFileId());
             inputMedia.add(inputMediaPhoto);
             sendMediaGroup.setMedia(inputMedia);
             //TODO: сделать на видео, фото, анимации
             //TODO: вставлять имя отправителя и подписку под фото
-        }
+        });
         return sendMediaGroup;
     }
 
-    private Update findUpdate(Integer messageId) {
-        for (Update update : updates) {
-            if (update.hasMessage() && update.getMessage().getMessageId().equals(messageId)) {
-                return update;
-            } else if (update.hasCallbackQuery() && update.getCallbackQuery().getMessage().getMessageId().equals(messageId)) {
-                return update;
-            }
-        }
-        return null;
+    private Optional<Update> findUpdate(Integer messageId) {
+        return updateMap.values().stream()
+            .flatMap(Collection::stream)
+            .filter(update -> (update.hasMessage() && update.getMessage().getMessageId().equals(messageId))
+                || (update.hasCallbackQuery() && update.getCallbackQuery().getMessage().getMessageId().equals(messageId)))
+            .findFirst();
     }
 
-    private ArrayList<Update> findMultipleUpdates() {
-        ArrayList<Update> multipleUpdates = new ArrayList<>();
-        if (updates.size() >= 2) {
-            for (int i = 0; i < updates.size(); i++) {
-                if (updates.get(i).getMessage().getDate().equals(updates.get(i + 1).getMessage().getDate())) {
-                    multipleUpdates.add(updates.get(i));
-                    if (!(updates.get(i + 1).equals(null)) && updates.get(i + 1).equals(updates.getLast())) {
-                        multipleUpdates.add(updates.get(i + 1));
-                        return multipleUpdates;
-                    }
-                }
-            }
-        }
-        return null;
+    private Optional<List<Update>> findMultipleUpdates() {
+        return updateMap.values().stream()
+            .filter(updates -> updates.size() > 1)
+            .findFirst();
     }
 
-    private Poll findPoll(Update update) {
-        for (Poll poll : polls) {
-            if (update.hasCallbackQuery() &&
-                    update.getCallbackQuery().getMessage().getMessageId().equals(poll.getMessageId())) {
-                return poll;
-            }
-        }
-        return null;
+    private Optional<PollEntity> findPoll(Update update) {
+        return polls.stream()
+            .filter(poll -> update.hasCallbackQuery()
+                && update.getCallbackQuery().getMessage().getMessageId().equals(poll.getMessageId()))
+            .findFirst();
+    }
+
+    private void addUpdate(Update update){
+      Integer date = update.getMessage().getDate();
+      if (!updateMap.containsKey(date)){
+        updateMap.put(date, Lists.newArrayList(update));
+      } else {
+        updateMap.get(date).add(update);
+      }
     }
 
     public String getBotUsername() {
