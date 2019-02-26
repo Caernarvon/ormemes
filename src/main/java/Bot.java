@@ -26,6 +26,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 public class Bot extends TelegramLongPollingBot implements Lock {
     private final String CHAT_ID = "-1001302700256";
     private final String CHANNEL_ID = "-1001441629708";
+    private final String BOT_TOKEN = "";
 
     private LinkedList<PollEntity> polls = Lists.newLinkedList();
     private Map<Integer, List<Update>> updateMap = Maps.newHashMap();
@@ -220,7 +221,7 @@ public class Bot extends TelegramLongPollingBot implements Lock {
     }
 
     public String getBotToken() {
-        return "";
+        return BOT_TOKEN;
     }
 
     @Override
