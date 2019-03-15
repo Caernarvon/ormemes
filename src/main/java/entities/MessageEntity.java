@@ -34,8 +34,8 @@ public class MessageEntity {
         try {
             GetChatAdministrators getChatAdministrators = new GetChatAdministrators()
                     .setChatId(CHAT_ID);
-            sentByAdmin = CURRENT_BOT.execute(getChatAdministrators).stream().findFirst().get().getUser().getId()
-                    .equals(update.getMessage().getFrom().getId());
+            sentByAdmin = CURRENT_BOT.execute(getChatAdministrators).stream()
+                    .anyMatch(chatMember -> chatMember.getUser().getId().equals(update.getMessage().getFrom().getId()));
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
