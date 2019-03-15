@@ -38,7 +38,7 @@ public class Bot extends TelegramLongPollingBot {
     public void onUpdateReceived(Update update) {
         if (update.hasCallbackQuery()) {
             //Poll click
-            if (update.getCallbackQuery().getData().equals(CallbackData.VOTE.name()) &&
+            if (update.getCallbackQuery().getData().contains(CallbackData.VOTE.name()) &&
                     !update.getCallbackQuery().getMessage().getText().contains(update.getCallbackQuery().getFrom().getFirstName())) {
                 findPoll(update).ifPresent(poll -> editPoll(update, poll));
             }
@@ -46,15 +46,20 @@ public class Bot extends TelegramLongPollingBot {
             //Message received
             if (update.getMessage().hasPhoto() || update.getMessage().hasDocument() || update.getMessage().hasVideo()) {
                 MessageEntity.newEntity(update);
+                sendMessage("Принято на рассмотрение", update);
+            } else {
+                sendMessage("Произошла ошибка", update);
             }
+        } else {
+            sendMessage("Произошла ошибка", update);
         }
     }
 
 
     private InlineKeyboardMarkup createPoll(Update update, Integer connectedPostId, boolean sentByAdmin) {
         InlineKeyboardButton yesButton = new InlineKeyboardButton()
-                .setText("В прод  -  " + (sentByAdmin ? 1 : 0))
-                .setCallbackData(CallbackData.VOTE.name());
+                .setText("На канал  -  " + (sentByAdmin ? 1 : 0))
+                .setCallbackData(CallbackData.VOTE.name() + ", " + connectedPostId);
 
         List<InlineKeyboardButton> keyboardButtonsRow = Lists.newArrayList();
         keyboardButtonsRow.add(yesButton);
@@ -82,7 +87,7 @@ public class Bot extends TelegramLongPollingBot {
                 .setChatId(CHAT_ID)
                 .setText("За: ")
                 .setReplyMarkup(inlineKeyboardMarkup);
-        if(username != null) {
+        if (username != null) {
             sendMessage.setText("За: " + username);
         }
         try {
@@ -94,21 +99,18 @@ public class Bot extends TelegramLongPollingBot {
 
     private void editPoll(Update update, PollEntity poll) {
         poll.setCounter(poll.getCounter() + 1);
-        poll.getInlineKeyboardMarkup().getKeyboard().get(0).get(0).setText("В прод  -  " + poll.getCounter().toString()); // отображение кол-ва проголосовавших
+        poll.getInlineKeyboardMarkup().getKeyboard().get(0).get(0).setText("На канал  -  " + poll.getCounter().toString()); // отображение кол-ва проголосовавших
 
         EditMessageText editMessage = new EditMessageText()
                 .setChatId(CHAT_ID)
-                .setText(update.getCallbackQuery().getMessage().getText() + " " + update.getCallbackQuery().getFrom().getFirstName() + ", ")
-                .setMessageId(poll.getMessageId());
-        editMessage.setReplyMarkup(poll.getInlineKeyboardMarkup());
+                .setMessageId(poll.getMessageId())
+                .setReplyMarkup(poll.getInlineKeyboardMarkup())
+                .setText(update.getCallbackQuery().getMessage().getText() + generateName(update));
 
         try {
             GetChatMemberCount getChatMemberCount = new GetChatMemberCount().setChatId(CHAT_ID);
             int membersCount = execute(getChatMemberCount) / 2;
             if (poll.getCounter() >= membersCount) {
-                editMessage.setText("Пост отправлен");
-                execute(editMessage);
-
                 findUpdate(poll.getConnectedPostId()).ifPresent(upd -> {
                     try {
                         if (upd.getMessage().hasPhoto()) {
@@ -129,6 +131,8 @@ public class Bot extends TelegramLongPollingBot {
                                 sendMultipleMedia(poll);
                             }
                         }
+                        editMessage.setText("Пост на канале");
+                        execute(editMessage);
                     } catch (TelegramApiException e) {
                         e.printStackTrace();
                     }
@@ -150,23 +154,48 @@ public class Bot extends TelegramLongPollingBot {
         }
         if (messageEntity.isSentByAdmin()) {
             postPoll(createPoll(updateList.get(0), updateList.get(0).getMessage().getMessageId(), messageEntity.isSentByAdmin()),
-                    messageEntity.getUpdateList().get(0).getMessage().getFrom().getFirstName());
+                    generateName(messageEntity.getUpdateList().get(0)));
         } else {
             postPoll(createPoll(updateList.get(0), updateList.get(0).getMessage().getMessageId(), messageEntity.isSentByAdmin()), null);
         }
     }
 
-    private void sendPhoto(Update update, PollEntity poll) throws TelegramApiException {
-        if (!findMultipleUpdates().isPresent()) {
-            SendPhoto sendPhoto = new SendPhoto()
-                    .setPhoto(update.getMessage().getPhoto().get(0).getFileId())
-                    .setCaption("прислал(а) " + update.getMessage().getFrom().getFirstName() + " через @ormemes_bot")
-                    .setChatId(CHANNEL_ID);
-            execute(sendPhoto);
-            findUpdate(poll.getConnectedPostId()).ifPresent(foundUpdate -> {
-                MessageEntity.messageMap.remove(foundUpdate.getMessage().getDate());
-            });
+    private void sendMessage(String text, Update update) {
+        SendMessage sendMessage = new SendMessage()
+                .setText(text)
+                .setChatId(update.getMessage().getChatId());
+        try {
+            execute(sendMessage);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
         }
+    }
+
+    private String generateName(Update update) {
+        if (update.hasCallbackQuery()) {
+            if (update.getCallbackQuery().getFrom().getUserName() != null) {
+                return "@" + update.getCallbackQuery().getFrom().getUserName();
+            } else {
+                return update.getCallbackQuery().getFrom().getFirstName();
+            }
+        } else {
+            if (update.getMessage().getFrom().getUserName() != null) {
+                return "@" + update.getMessage().getFrom().getUserName();
+            } else {
+                return update.getMessage().getFrom().getFirstName();
+            }
+        }
+    }
+
+    private void sendPhoto(Update update, PollEntity poll) throws TelegramApiException {
+        SendPhoto sendPhoto = new SendPhoto()
+                .setPhoto(update.getMessage().getPhoto().get(0).getFileId())
+                .setCaption("прислал(а) " + generateName(update) + " через @ormemes_bot")
+                .setChatId(CHANNEL_ID);
+        execute(sendPhoto);
+        findUpdate(poll.getConnectedPostId()).ifPresent(foundUpdate -> {
+            MessageEntity.messageMap.remove(foundUpdate.getMessage().getDate());
+        });
     }
 
     private void sendVideo(Update update, PollEntity poll) throws TelegramApiException {
@@ -260,7 +289,7 @@ public class Bot extends TelegramLongPollingBot {
     }
 
     public String getBotUsername() {
-        return null;
+        return "ormemes";
     }
 
     public String getBotToken() {
